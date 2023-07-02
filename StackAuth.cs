@@ -19,7 +19,7 @@ using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Drawing;
 
-namespace YourNameSpace
+namespace YourAppName
 {
     internal class App
     {
@@ -107,6 +107,7 @@ namespace YourNameSpace
         public static string RegisterDate { get; set; }
 
         public static string ProfilePicture { get; set; }
+        public static string Ban_Reason { get; set; }
     }
     internal class ApplicationSettings
     {
@@ -608,7 +609,7 @@ namespace YourNameSpace
                             string Variables = response[14];
                             User.ProfilePicture = response[15];
                             ApplicationSettings.Updater_Check = response[16];
-
+                            User.Ban_Reason = response[17];
                             foreach (string var in Variables.Split('~'))
                             {
                                 string[] items = var.Split('^');
@@ -639,7 +640,8 @@ namespace YourNameSpace
                             Security.End();
                             return false;
                         case "banned":
-                            MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            User.Ban_Reason = response[16];
+                            MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!" + Environment.NewLine + "Reason: " + User.Ban_Reason, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                             Security.End();
                             return false;
                     }
@@ -808,7 +810,6 @@ namespace YourNameSpace
                             User.RegisterDate = response[13];
                             string Variables = response[14];
                             User.ProfilePicture = response[15];
-
                             foreach (string var in Variables.Split('~'))
                             {
                                 string[] items = var.Split('^');
@@ -841,7 +842,8 @@ namespace YourNameSpace
                             Security.End();
                             return false;
                         case "banned":
-                            MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            User.Ban_Reason = response[16];
+                            MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!" + Environment.NewLine + "Reason: " + User.Ban_Reason, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                             Security.End();
                             Application.Exit();
                             return false;
