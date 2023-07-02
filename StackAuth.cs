@@ -180,8 +180,10 @@ namespace YourAppName
         {
             if (debugcheck)
             {
-                Security.AntiDebugger();
-                Security.AntiSandboxie();
+                if(Security.AntiSandboxie() || Security.AntiDebugger())
+                {
+                    Process.GetCurrentProcess().Kill();
+                }
             }
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(aid) || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(version) || name.Contains("APPNAME"))
@@ -353,6 +355,163 @@ namespace YourAppName
 
     internal class StackAPI
     {
+        public static void ForgotPassword(string username, string newpassword)
+        {
+            if(newpassword== null || string.IsNullOrWhiteSpace(newpassword))
+            {
+                MessageBox.Show("Please put desire password in the password field!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Process.GetCurrentProcess().Kill();
+            }
+            if (username == null || string.IsNullOrWhiteSpace(username))
+            {
+                MessageBox.Show("Username cannot be empty!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Process.GetCurrentProcess().Kill();
+            }
+
+            string[] response = new string[] { };
+            using (StackWebClient wc = new StackWebClient())
+            {
+
+                try
+                {
+                    wc.Proxy = null;
+                    Security.Start();
+                    response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
+                    {
+                        ["token"] = Encryption.EncryptService(Constants.Token),
+                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
+                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
+                        ["username"] = Encryption.APIService(username),
+                        ["newpass"] = Encryption.APIService(newpassword),
+                        ["hwid"] = Encryption.APIService(Constants.HWID()),
+                        ["session_id"] = Constants.IV,
+                        ["api_id"] = Constants.APIENCRYPTSALT,
+                        ["api_key"] = Constants.APIENCRYPTKEY,
+                        ["session_key"] = Constants.Key,
+                        ["secret"] = Encryption.APIService(OnProgramStart.Secret),
+                        ["type"] = Encryption.APIService("forgotpass")
+
+                    }))).Split("|".ToCharArray()));
+
+                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
+                    {
+                        MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Process.GetCurrentProcess().Kill();
+                    }
+
+                    switch (response[2])
+                    {
+                        case "success":
+                            MessageBox.Show("Successfully updated password!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            Security.End();
+                            return;
+                        case "incorrect":
+                            MessageBox.Show("No account matches this hwid!" + Environment.NewLine + "Please make a ticket for more help on our discord", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            Process.GetCurrentProcess().Kill();
+                            return;
+                        case "expired":
+                            MessageBox.Show("Please renew your Subscription to use this feature!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            Process.GetCurrentProcess().Kill();
+                            return;
+                        case "failed":
+                            MessageBox.Show("Failed to update password!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Process.GetCurrentProcess().Kill();
+                }
+            }
+
+        }
+        public static void UpdateInformation(string email, string password)
+        {
+            if(email == null)
+            {
+                email = User.Email;
+            }
+
+            if(password == null)
+            {
+                password = User.Password;
+            }
+
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                MessageBox.Show("Invalid Picture information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Process.GetCurrentProcess().Kill();
+            }
+
+      
+            string[] response = new string[] { };
+            using (StackWebClient wc = new StackWebClient())
+            {
+
+                try
+                {
+                    wc.Proxy = null;
+                    Security.Start();
+                    response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
+                    {
+                        ["token"] = Encryption.EncryptService(Constants.Token),
+                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
+                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
+                        ["username"] = Encryption.APIService(User.Username),
+                        ["password"] = Encryption.APIService(User.Password),
+                        ["newemail"] = Encryption.APIService(email),
+                        ["newpass"] = Encryption.APIService(password),
+                        ["session_id"] = Constants.IV,
+                        ["api_id"] = Constants.APIENCRYPTSALT,
+                        ["api_key"] = Constants.APIENCRYPTKEY,
+                        ["session_key"] = Constants.Key,
+                        ["secret"] = Encryption.APIService(OnProgramStart.Secret),
+                        ["type"] = Encryption.APIService("updateinfo")
+
+                    }))).Split("|".ToCharArray()));
+
+                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
+                    {
+                        MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Process.GetCurrentProcess().Kill();
+                    }
+
+                    switch (response[0])
+                    {
+                        case "success":
+                            User.Email = email;
+                            User.Password = password;
+                            MessageBox.Show("Successfully updated information!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            Security.End();
+                            return;
+                        case "incorrect":
+                            MessageBox.Show("Failed to login!" + Environment.NewLine + "Unable to update info", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            Process.GetCurrentProcess().Kill();
+                            return;
+                        case "expired":
+                            MessageBox.Show("Please renew your Subscription to use this feature!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            Process.GetCurrentProcess().Kill();
+                            return;
+                        case "failed":
+                            MessageBox.Show("Failed to update information!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Process.GetCurrentProcess().Kill();
+                }
+            }
+
+        }
         public static void Log(string reason)
         {
             if (!Constants.Initialized)
@@ -1279,7 +1438,7 @@ namespace YourAppName
             catch { }
 
         }
-        public static bool AntiDebugger() //test
+        public static bool AntiDebugger() 
         {
             bool DebuggerPresent = false;
             CheckRemoteDebuggerPresent(OpenProcess(ProcessAccessFlags.All, false, Process.GetCurrentProcess().Id), ref DebuggerPresent);
