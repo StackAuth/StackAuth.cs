@@ -4,7 +4,6 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Management;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Security;
@@ -15,10 +14,12 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
-using System.Windows;
 using System.Runtime.InteropServices;
+using Newtonsoft.Json.Linq;
+using System.IO.Compression;
+using System.Drawing;
 
-namespace YourAppNameSpace
+namespace YourNameSpace
 {
     internal class App
     {
@@ -41,8 +42,8 @@ namespace YourAppNameSpace
                 return $"{name} don't exist!";
             }
         }
-        public static string Error = null;
         public static Dictionary<string, string> Variables = new Dictionary<string, string>();
+    }
 
     internal class Constants
     {
@@ -74,7 +75,7 @@ namespace YourAppNameSpace
         {
             return new string(Enumerable.Repeat("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", length).Select(s => s[random.Next(s.Length)]).ToArray());
         }
-       
+
         public static string HWID()
         {
             return WindowsIdentity.GetCurrent().User.Value;
@@ -107,7 +108,6 @@ namespace YourAppNameSpace
 
         public static string ProfilePicture { get; set; }
     }
-    
     internal class ApplicationSettings
     {
         public static bool Status { get; set; }
@@ -119,6 +119,8 @@ namespace YourAppNameSpace
         public static string Version { get; set; }
 
         public static string Update_Link { get; set; }
+
+        public static string Updater_Check { get; set; }
 
         public static bool Freemode { get; set; }
 
@@ -184,6 +186,7 @@ namespace YourAppNameSpace
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(aid) || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(version) || name.Contains("APPNAME"))
             {
                 MessageBox.Show("Failed to initialize your application correctly in Program.cs!", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                System.Diagnostics.Process.Start("http://docs.stackworkshop.com");
                 Process.GetCurrentProcess().Kill();
             }
             AID = aid;
@@ -213,18 +216,17 @@ namespace YourAppNameSpace
                         ["type"] = Encryption.APIService("start")
 
                     }))).Split("|".ToCharArray()));
-
                     if (response[14] != ActivateKey)
                     {
-                        StackAPI.Log(Environment.UserName, "01");
+                        StackAPI.Log("01");
                         Process.GetCurrentProcess().Kill();
                     }
-                    if(wc.ResponseUri.ToString() != Constants.ApiUrl)
+                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
                     {
                         MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
-                    if(wc.GetHost.ToString() != "stackworkshop.com")
+                    if (wc.GetHost.ToString() != "stackworkshop.com")
                     {
                         MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
@@ -264,6 +266,7 @@ namespace YourAppNameSpace
                             if (response[11] == "Enabled")
                                 ApplicationSettings.Register = true;
                             ApplicationSettings.TotalUsers = response[13];
+                            ApplicationSettings.Updater_Check = response[15];
                             if (ApplicationSettings.DeveloperMode)
                             {
                                 MessageBox.Show("Application is in Developer Mode, bypassing integrity and update check!", Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -284,9 +287,40 @@ namespace YourAppNameSpace
                                 }
                                 if (ApplicationSettings.Version != Version)
                                 {
-                                    MessageBox.Show($"Update {ApplicationSettings.Version} available, redirecting to update!", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                                    Process.Start(ApplicationSettings.Update_Link);
-                                    Process.GetCurrentProcess().Kill();
+                                    if (ApplicationSettings.Updater_Check == "Enabled")
+                                    {
+                                        if (!Directory.Exists("updater"))
+                                        {
+                                            Directory.CreateDirectory("updater");
+                                        }
+
+                                        if (!File.Exists("updater/StackUpdate.exe"))
+                                        {
+                                            WebClient client = new WebClient();
+                                            client.DownloadFile("https://stackworkshop.com/auth/StackUpdate/StackUpdate.zip", "updater/StackUpdate.zip");
+                                            ZipFile.ExtractToDirectory("updater/StackUpdate.zip", "updater/"); //Use Nuget to Install System.IO.Compression.ZipFile
+                                        }
+
+                                        if (File.Exists("updater/update.json"))
+                                        {
+                                            File.Delete("updater/update.json");
+                                        }
+
+                                        string json = "{'StackAuth':{'update': [{'id': 'Stack_01_9308','username': '" + User.Username + "','version': '" + version + "','URL':'" + ApplicationSettings.Update_Link + "'}],'Info': [{'AppName':'" + OnProgramStart.Name + "'}]}}";
+                                        JObject jsonobject = JObject.Parse(json);
+
+                                        File.Create("updater/update.json").Dispose();
+                                        File.WriteAllText("updater/update.json", jsonobject.ToString());
+                                        Process.Start(AppDomain.CurrentDomain.BaseDirectory + "/updater/StackUpdate.exe");
+                                        Process.GetCurrentProcess().Kill();
+                                    }
+                                    else
+                                    {
+                                        MessageBox.Show($"Update {ApplicationSettings.Version} available, redirecting to update!", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                        Process.Start(ApplicationSettings.Update_Link);
+                                        Process.GetCurrentProcess().Kill();
+                                    }
+
                                 }
 
                             }
@@ -318,14 +352,14 @@ namespace YourAppNameSpace
 
     internal class StackAPI
     {
-        public static void Log(string username, string action)
+        public static void Log(string reason)
         {
             if (!Constants.Initialized)
             {
                 MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
             }
-            if (string.IsNullOrWhiteSpace(action))
+            if (string.IsNullOrWhiteSpace(reason))
             {
                 MessageBox.Show("Missing log information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
@@ -341,16 +375,20 @@ namespace YourAppNameSpace
                     {
                         ["token"] = Encryption.EncryptService(Constants.Token),
                         ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["username"] = Encryption.APIService(username),
+                        ["username"] = Encryption.APIService(User.Username),
                         ["pcuser"] = Encryption.APIService(Environment.UserName),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
                         ["api_key"] = Constants.APIENCRYPTKEY,
-                        ["data"] = Encryption.APIService(action),
+                        ["data"] = Encryption.APIService(reason),
                         ["session_key"] = Constants.Key,
                         ["secret"] = Encryption.APIService(OnProgramStart.Secret),
                         ["type"] = Encryption.APIService("log")
                     }))).Split("|".ToCharArray()));
+
+                    if (response[3] == "empty_webhook")
+                        MessageBox.Show("No webhook set, Please login to the panel and add a discord webhook", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+
                     Security.End();
                 }
                 catch (Exception ex)
@@ -360,7 +398,7 @@ namespace YourAppNameSpace
                 }
             }
         }
-        public static void Ban(string username, string action)
+        public static void Ban(string action)
         {
             if (!Constants.Initialized)
             {
@@ -383,7 +421,8 @@ namespace YourAppNameSpace
                     {
                         ["token"] = Encryption.EncryptService(Constants.Token),
                         ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["username"] = Encryption.APIService(username),
+                        ["username"] = Encryption.APIService(User.Username),
+                        ["password"] = Encryption.APIService(User.Password),
                         ["pcuser"] = Encryption.APIService(Environment.UserName),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
@@ -403,13 +442,15 @@ namespace YourAppNameSpace
             }
         }
 
-        public static void UploadPic(string username, string path)
+        public static void ChangeProfilePic(string path)
         {
-            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(path))
             {
                 MessageBox.Show("Invalid Picture information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
             }
+
+            string picture = Convert.ToBase64String(File.ReadAllBytes(path));
             string[] response = new string[] { };
             using (StackWebClient wc = new StackWebClient())
             {
@@ -423,8 +464,9 @@ namespace YourAppNameSpace
                         ["token"] = Encryption.EncryptService(Constants.Token),
                         ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
                         ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["username"] = Encryption.APIService(username),
-                        ["picbytes"] = Encryption.APIService(path),
+                        ["username"] = Encryption.APIService(User.Username),
+                        ["password"] = Encryption.APIService(User.Password),
+                        ["picbytes"] = Encryption.APIService(picture),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
                         ["api_key"] = Constants.APIENCRYPTKEY,
@@ -446,9 +488,15 @@ namespace YourAppNameSpace
                             MessageBox.Show("Successfully updated profile picture!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
                             Security.End();
                             return;
-                        case "permissions":
-                            MessageBox.Show("Please upgrade your plan to use this feature!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        case "incorrect":
+                            MessageBox.Show("Failed to Login!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                             Security.End();
+                            Process.GetCurrentProcess().Kill();
+                            return;
+                        case "expired":
+                            MessageBox.Show("Please renew your Subscription to use this feature!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            Security.End();
+                            Process.GetCurrentProcess().Kill();
                             return;
                         case "maxsize":
                             MessageBox.Show("Image cannot be greater than 1 MB!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -541,6 +589,7 @@ namespace YourAppNameSpace
                         MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
+
                     switch (response[2])
                     {
                         case "success":
@@ -558,6 +607,8 @@ namespace YourAppNameSpace
                             User.RegisterDate = response[13];
                             string Variables = response[14];
                             User.ProfilePicture = response[15];
+                            ApplicationSettings.Updater_Check = response[16];
+
                             foreach (string var in Variables.Split('~'))
                             {
                                 string[] items = var.Split('^');
@@ -785,9 +836,8 @@ namespace YourAppNameSpace
                             Security.End();
                             return false;
                         case "invalid_hwid":
-                            Constants.secondlogin = true;
                             Constants.hwidcheckvalid = true;
-                            //MessageBox.Show("This user is binded to another computer, please contact support!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            MessageBox.Show("This user is binded to another computer, please contact support!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                             Security.End();
                             return false;
                         case "banned":
@@ -807,6 +857,90 @@ namespace YourAppNameSpace
 
             }
         }
+        public static bool ResetHwid(string username, string password)
+        {
+            if (!Constants.Initialized)
+            {
+                MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Process.GetCurrentProcess().Kill();
+            }
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            {
+                MessageBox.Show("Missing user login information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Process.GetCurrentProcess().Kill();
+            }
+            string[] response = new string[] { };
+            using (StackWebClient wc = new StackWebClient())
+            {
+                try
+                {
+                    Security.Start();
+                    wc.Proxy = null;
+                    response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
+                    {
+                        ["token"] = Encryption.EncryptService(Constants.Token),
+                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
+                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
+                        ["session_id"] = Constants.IV,
+                        ["api_id"] = Constants.APIENCRYPTSALT,
+                        ["api_key"] = Constants.APIENCRYPTKEY,
+                        ["username"] = Encryption.APIService(username),
+                        ["password"] = Encryption.APIService(password),
+                        ["hwid"] = Encryption.APIService(Constants.HWID()),
+                        ["session_key"] = Constants.Key,
+                        ["secret"] = Encryption.APIService(OnProgramStart.Secret),
+                        ["type"] = Encryption.APIService("resethwid")
+
+                    }))).Split("|".ToCharArray()));
+
+                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
+                    {
+                        MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Process.GetCurrentProcess().Kill();
+                    }
+
+                    if (response[0] != Constants.Token)
+                    {
+                        MessageBox.Show(response[0]);
+                        MessageBox.Show("Security error has been triggered!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Process.GetCurrentProcess().Kill();
+                    }
+                    if (Security.MaliciousCheck(response[1]))
+                    {
+                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Process.GetCurrentProcess().Kill();
+                    }
+                    if (Constants.Breached)
+                    {
+                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        Process.GetCurrentProcess().Kill();
+                    }
+                    switch (response[2])
+                    {
+                        case "hwid_reset":
+                            MessageBox.Show("Your HWID has been resetted!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            Security.End();
+                            return true;
+                        case "invalid_details":
+                            Security.End();
+                            return false;
+                        case "hwid_wait":
+                            MessageBox.Show("Please wait 24 hours before resetting your hwid!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            Security.End();
+                            return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Security.End();
+                    Process.GetCurrentProcess().Kill();
+                }
+                return false;
+
+            }
+        }
+
         public static bool Register(string username, string password, string email, string license)
         {
             if (!Constants.Initialized)
@@ -1071,75 +1205,75 @@ namespace YourAppNameSpace
             MaxProcessInfoClass = 0x64
         }
         public static void DebugandProcessCheck()
-        { 
-                try
+        {
+            try
+            {
+
+                bool isDebuggerPresent = false;
+                CheckRemoteDebuggerPresent(Process.GetCurrentProcess().Handle, ref isDebuggerPresent);
+                if (Debugger.IsAttached || isDebuggerPresent)
+                    Abandon();
+
+                string[] IllegalProcessName = { "Fiddler", "Wireshark", "dumpcap", "dnSpy", "dnSpy-x86", "cheatengine-x86_64", "HTTPDebuggerUI", "Procmon", "Procmon64", "Procmon64a", "ProcessHacker", "x32dbg", "x64dbg", "DotNetDataCollector32", "DotNetDataCollector64" };
+                string[] IllegalWindowName = { "Progress Telerik Fiddler Web Debugger", "Wireshark" };
+                string[] VmProcess = { "VBoxService", "VBoxTray" };
+                string[] VmDriver = { "VBoxGuest.sys", "VBoxMouse.sys", "VBoxSF.sys", "VBoxWddm.sys" };
+                string[] IllegalContains = { "dumper", "debugger", "http" };
+
+                Process[] ProcessList = Process.GetProcesses();
+                foreach (Process proc in ProcessList)
                 {
-
-                    bool isDebuggerPresent = false;
-                    CheckRemoteDebuggerPresent(Process.GetCurrentProcess().Handle, ref isDebuggerPresent);
-                    if (Debugger.IsAttached || isDebuggerPresent)
-                        Abandon();
-
-                    string[] IllegalProcessName = { "Fiddler", "Wireshark", "dumpcap", "dnSpy", "dnSpy-x86", "cheatengine-x86_64", "HTTPDebuggerUI", "Procmon", "Procmon64", "Procmon64a", "ProcessHacker", "x32dbg", "x64dbg", "DotNetDataCollector32", "DotNetDataCollector64" };
-                    string[] IllegalWindowName = { "Progress Telerik Fiddler Web Debugger", "Wireshark" };
-                    string[] VmProcess = { "VBoxService", "VBoxTray" };
-                    string[] VmDriver = { "VBoxGuest.sys", "VBoxMouse.sys", "VBoxSF.sys", "VBoxWddm.sys" };
-                    string[] IllegalContains = { "dumper", "debugger", "http" };
-
-                    Process[] ProcessList = Process.GetProcesses();
-                    foreach (Process proc in ProcessList)
+                    for (int i = 0; i < IllegalContains.Length; i++)
                     {
-                        for (int i = 0; i < IllegalContains.Length; i++)
+                        if (proc.ProcessName.ToLower().Contains(IllegalContains[i].ToLower()))
                         {
-                            if (proc.ProcessName.ToLower().Contains(IllegalContains[i].ToLower()))
-                            {
-                                StackAPI.Ban(User.Username, "illegalprocess");
-                                Abandon();
-                            }
-                        }
-
-                        for (int i = 0; i < IllegalProcessName.Length; i++)
-                        {
-                            //check process name
-                            if (proc.ProcessName == IllegalProcessName[i])
-                            {
-                            StackAPI.Ban(User.Username, "illegalprocess");
+                            StackAPI.Ban("illegalprocess");
                             Abandon();
-                            }
                         }
-
-                        for (int i = 0; i < IllegalWindowName.Length; i++)
-                        {
-                            //check process window title
-                            if (proc.MainWindowTitle == IllegalWindowName[i])
-                            {
-                                StackAPI.Ban(User.Username, "illegalprocess");
-                                Abandon();
-                            }
-                        }
-
-                        for (int i = 0; i < VmProcess.Length; i++)
-                        {
-                            //check process name
-                            if (proc.ProcessName == VmProcess[i])
-                            {
-                                StackAPI.Ban(User.Username, "vmprocess");
-                                Abandon();
-                            }
-                        }
-
-                        for (int i = 0; i < VmDriver.Length; i++)
-                        {
-                            if (Directory.Exists("C:\\Windows\\System32\\drivers\\" + VmDriver[i]))
-                            {
-                                StackAPI.Ban(User.Username, "vmdrivers");
-                                Abandon();
-                            }
-                        }
-
-
                     }
+
+                    for (int i = 0; i < IllegalProcessName.Length; i++)
+                    {
+                        //check process name
+                        if (proc.ProcessName == IllegalProcessName[i])
+                        {
+                            StackAPI.Ban("illegalprocess");
+                            Abandon();
+                        }
+                    }
+
+                    for (int i = 0; i < IllegalWindowName.Length; i++)
+                    {
+                        //check process window title
+                        if (proc.MainWindowTitle == IllegalWindowName[i])
+                        {
+                            StackAPI.Ban("illegalprocess");
+                            Abandon();
+                        }
+                    }
+
+                    for (int i = 0; i < VmProcess.Length; i++)
+                    {
+                        //check process name
+                        if (proc.ProcessName == VmProcess[i])
+                        {
+                            StackAPI.Ban("vmprocess");
+                            Abandon();
+                        }
+                    }
+
+                    for (int i = 0; i < VmDriver.Length; i++)
+                    {
+                        if (Directory.Exists("C:\\Windows\\System32\\drivers\\" + VmDriver[i]))
+                        {
+                            StackAPI.Ban("vmdrivers");
+                            Abandon();
+                        }
+                    }
+
+
                 }
+            }
             catch { }
 
         }
@@ -1221,7 +1355,7 @@ namespace YourAppNameSpace
                     if (contents.Contains("stackworkshop.com"))
                     {
                         Constants.Breached = true;
-                        StackAPI.Ban(User.Username, "dnsredirect");
+                        StackAPI.Ban("dnsredirect");
                         MessageBox.Show("DNS redirecting has been detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                         Process.GetCurrentProcess().Kill();
                     }
@@ -1236,7 +1370,7 @@ namespace YourAppNameSpace
                 Constants.Key = Convert.ToBase64String(Encoding.Default.GetBytes(Constants.RandomString(32)));
                 Constants.Started = true;
 
-                if(OnProgramStart.ProcessCheck)
+                if (OnProgramStart.ProcessCheck)
                 {
                     Security.DebugandProcessCheck();
                 }
@@ -1275,18 +1409,19 @@ namespace YourAppNameSpace
             OnProgramStart.Version = "8.1.9.2";
             OnProgramStart.Salt = null;
         }
-        API.Bot oof = new API.Bot();
+
         private static bool PinPublicKey(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
-            
-            if (certificate.GetPublicKeyString() != _key)
+
+
+            if ((!certificate.Issuer.Contains("Cloudflare Inc") && !certificate.Issuer.Contains("Google Trust Services") && !certificate.Issuer.Contains("Let's Encrypt")) || sslPolicyErrors != SslPolicyErrors.None)
             {
-                Clipboard.SetText(certificate.GetPublicKeyString());
+                return false;
             }
-            return certificate != null && certificate.GetPublicKeyString() == _key;
+
+            return certificate != null;
         }
-        //SSL Key, needs update once a year
-         private const string _key = "3082010A0282010100B058527AB3932351CD2B8DBEE0ED28D4E2B40B4802546C27ECFFDF2D63DC6CC855E989E3324E8DE5E9F115CEBF2F5557375712672A9B50264473E0469EDF78FC0DC407810C65398222AE1EE529214DFDA9563A467EB642F6DC70AD0C70BC57BA600483B2FA827284E5770E5A1E9EBDC986CA72F6F6A680443F9D56B0F0939509292D06EA3BE67CA2F181A500DB9CB66423D23A4974A4DA5160A018B5F0CE7E86AEB959BE6F9963EE1B95CA2026C76576CB6E64AB6AF527F55965DBFE0D8B5A9E3DC5453C57D76EEF4D5E823FCB9094D923C1BC630F734222B65523ED5BCA548F9213790AFF981FD2F89954013D3F73D2A5EFCCA32F8AF07A4D5CED7C8AAEC7390203010001";
+
         public static string Integrity(string filename)
         {
             string result;
