@@ -98,10 +98,15 @@ MessageBox.Show("You have successfully registered!", OnProgramStart.Name, Messag
 ## Update Profile Picture
 
 ```
- StackAPI.UploadPic("USERNAMEHERE", @"C:\imagelocation.png");
+ StackAPI.ChangeProfilePic(path);
 ```
 ## Reset HWID
 
 ```
  StackAPI.ResetHwid(username, password);
+```
+## Ban
+
+```
+ StackAPI.Ban(reason);
 ```
