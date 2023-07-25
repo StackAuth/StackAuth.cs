@@ -19,9 +19,6 @@ using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Drawing;
 
-//pssdk.dll //debugger check
-//ws2_32.dll //debugger check
-
 namespace YourAppName
 {
     internal class App
