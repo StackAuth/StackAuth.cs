@@ -19,6 +19,9 @@ using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Drawing;
 
+//pssdk.dll //debugger check
+//ws2_32.dll //debugger check
+
 namespace YourAppName
 {
     internal class App
@@ -65,7 +68,13 @@ namespace YourAppName
 
         public static string Key = null;
 
-        public static string ApiUrl = "https://stackworkshop.com/auth/Auth/";
+        public static string ApiUrl;
+
+        public static string Server01 = "https://stackworkshop.com/auth/Auth/";
+
+        public static string Server02 = "https://stackauth.com/auth/";
+
+        public static string[] dllhash = { "Newtonsoft.Json.dll:081d9558bbb7adce142da153b2d5577a", "System.IO.Compression.ZipFile.dll:dcda916372128f13ada8b07026c1b3e7" };
 
         public static bool Initialized = false;
 
@@ -154,7 +163,7 @@ namespace YourAppName
         {
             var request = (HttpWebRequest)base.GetWebRequest(address);
             _GetHost = request.Host;
-            request.UserAgent = "Goodbye";
+            request.UserAgent = "StackAuth";
             _responseUri = request.RequestUri;
             request.AllowAutoRedirect = false;
             return request;
@@ -176,14 +185,25 @@ namespace YourAppName
         public static bool DebugCheck = false;
 
         public static bool ProcessCheck = false;
+
+        public static int server = 0;
         public static void Initialize(string name, string aid, string secret, string version, string ActivateKey, bool debugcheck, bool processcheck)
         {
+            Constants.ApiUrl = Constants.ApiUrl ?? Constants.Server01;
+
             if (debugcheck)
             {
                 if(Security.AntiSandboxie() || Security.AntiDebugger())
                 {
                     Process.GetCurrentProcess().Kill();
                 }
+            }
+
+            foreach(string dll in Constants.dllhash)
+            {
+                string dllpath = dll.Split(':')[0];
+                string hash = dll.Split(':')[1];
+                Security.HashCheck(dllpath, hash);
             }
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(aid) || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(version) || name.Contains("APPNAME"))
@@ -286,6 +306,7 @@ namespace YourAppName
                                     {
                                         MessageBox.Show($"File has been tampered with, couldn't verify integrity!", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                                         Process.GetCurrentProcess().Kill();
+                                        Process.GetProcessesByName("cmd.exe");
                                     }
                                 }
                                 if (ApplicationSettings.Version != Version)
@@ -346,8 +367,23 @@ namespace YourAppName
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(ex.Message, Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    Process.GetCurrentProcess().Kill();
+                    switch(Constants.ApiUrl)
+                    {
+                        case "https://stackworkshop.com/auth/Auth/":
+                            Constants.ApiUrl = Constants.Server02;
+                            break;
+                        case "https://stackauth.com/auth/":
+                            Constants.ApiUrl = Constants.Server01;
+                            break;
+                    }
+                    server++;
+                    if(server == 2)
+                    {
+                        MessageBox.Show("Server 1 and Server 2 are down! :(", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show(ex.Message, Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Process.GetCurrentProcess().Kill();
+                    }
+                    Initialize(name, aid, secret, version, ActivateKey, debugcheck, processcheck);
                 }
             }
         }
@@ -560,6 +596,7 @@ namespace YourAppName
         }
         public static void Ban(string action)
         {
+            Security.Abandon();
             if (!Constants.Initialized)
             {
                 MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -581,8 +618,8 @@ namespace YourAppName
                     {
                         ["token"] = Encryption.EncryptService(Constants.Token),
                         ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["username"] = Encryption.APIService(User.Username),
-                        ["password"] = Encryption.APIService(User.Password),
+                        ["username"] = Encryption.APIService(User.Username ?? Environment.UserName),
+                        ["password"] = Encryption.APIService(User.Password ?? "null"),
                         ["pcuser"] = Encryption.APIService(Environment.UserName),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
@@ -590,6 +627,7 @@ namespace YourAppName
                         ["data"] = Encryption.APIService(action),
                         ["session_key"] = Constants.Key,
                         ["secret"] = Encryption.APIService(OnProgramStart.Secret),
+                        ["hwid"] = Encryption.APIService(Constants.HWID()),
                         ["type"] = Encryption.APIService("ban")
                     }))).Split("|".ToCharArray()));
                     Security.End();
@@ -884,7 +922,6 @@ namespace YourAppName
                             return true;
                         case "error":
                             return false;
-
                     }
                 }
                 catch (Exception ex)
@@ -985,6 +1022,7 @@ namespace YourAppName
                             Security.End();
                             return true;
                         case "invalid_details":
+                             MessageBox.Show("Incorrect Details, Please Check you're username and password", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             Security.End();
                             return false;
                         case "time_expired":
@@ -1274,6 +1312,13 @@ namespace YourAppName
                 return false;
             }
         }
+        public static string LoadStringFromURL(string url)
+        {
+            string DResponse;
+            using (WebClient GData = new WebClient())
+                DResponse = GData.DownloadString(url).ToString();
+            return DResponse;
+        }
     }
     public static class ProcessExtensions
     {
@@ -1389,7 +1434,6 @@ namespace YourAppName
                         if (proc.ProcessName.ToLower().Contains(IllegalContains[i].ToLower()))
                         {
                             StackAPI.Ban("illegalprocess");
-                            Abandon();
                         }
                     }
 
@@ -1399,7 +1443,6 @@ namespace YourAppName
                         if (proc.ProcessName == IllegalProcessName[i])
                         {
                             StackAPI.Ban("illegalprocess");
-                            Abandon();
                         }
                     }
 
@@ -1409,7 +1452,6 @@ namespace YourAppName
                         if (proc.MainWindowTitle == IllegalWindowName[i])
                         {
                             StackAPI.Ban("illegalprocess");
-                            Abandon();
                         }
                     }
 
@@ -1419,7 +1461,6 @@ namespace YourAppName
                         if (proc.ProcessName == VmProcess[i])
                         {
                             StackAPI.Ban("vmprocess");
-                            Abandon();
                         }
                     }
 
@@ -1428,7 +1469,6 @@ namespace YourAppName
                         if (Directory.Exists("C:\\Windows\\System32\\drivers\\" + VmDriver[i]))
                         {
                             StackAPI.Ban("vmdrivers");
-                            Abandon();
                         }
                     }
 
@@ -1470,8 +1510,14 @@ namespace YourAppName
             //If the dll doesn't exist the handle will be NULL
             if (GetModuleHandle("SbieDll.dll").ToInt32() != 0)
                 return true;
-            else
-                return false;
+
+            if (GetModuleHandle("pssdk.dll").ToInt32() != 0)
+                return true;
+
+            if (GetModuleHandle("ws2_32.dll").ToInt32() != 0)
+                return true;
+
+            return false;
         }
         public static IntPtr OpenProcess(ProcessAccessFlags flags1, Process proc, ProcessAccessFlags flags)
         {
@@ -1493,6 +1539,7 @@ namespace YourAppName
             return new string(Enumerable.Repeat(chars, length)
              .Select(s => s[random.Next(s.Length)]).ToArray());
         }
+  
         public static string Obfuscate(int length)
         {
             Random random = new Random();
@@ -1573,8 +1620,6 @@ namespace YourAppName
 
         private static bool PinPublicKey(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
-
-
             if ((!certificate.Issuer.Contains("Cloudflare Inc") && !certificate.Issuer.Contains("Google Trust Services") && !certificate.Issuer.Contains("Let's Encrypt")) || sslPolicyErrors != SslPolicyErrors.None)
             {
                 return false;
@@ -1609,6 +1654,36 @@ namespace YourAppName
             else
             {
                 return false;
+            }
+        }
+
+        public static void HashCheck(string dllpath, string dllstoredhash)
+        {
+            if (File.Exists(dllpath))
+            {
+                if (CalculateMD5(dllpath) != dllstoredhash)
+                {
+                    StackAPI.Ban("Tampered File: " + dllpath);
+                    End();
+                    Process.GetCurrentProcess().Kill();
+                }
+            }
+        }
+
+        public static string GetHash(string dllpath)
+        {
+            return CalculateMD5(dllpath);
+        }
+
+        private static string CalculateMD5(string filename)
+        {
+            using (var md5 = MD5.Create())
+            {
+                using (var stream = File.OpenRead(filename))
+                {
+                    var hash = md5.ComputeHash(stream);
+                    return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                }
             }
         }
     }
@@ -1776,6 +1851,36 @@ namespace YourAppName
             Regex regex = new Regex(@regx);
             Match matches = regex.Match(GetArpTable());
             return matches.Groups[2].ToString();
+        }
+    }
+
+    class StackUtities
+    {
+        public string[] CreateArrayFromTxtFile(string txtfile)
+        {
+            if (File.Exists(txtfile))
+            {
+                return File.ReadAllLines(txtfile);
+
+            }
+            else
+            {
+                MessageBox.Show("File don't exist");
+                return "File don't exist".Split('|');
+            }
+        }
+
+        public static string OpenFileDialog(string title, string filter = "Text Files|*.txt|All Files|*.*")
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog()
+            {
+                Title = title,
+                Filter = filter
+            };
+
+            if (openFileDialog.ShowDialog() != DialogResult.OK) return null;
+
+            return openFileDialog.FileName;
         }
     }
 
