@@ -11,12 +11,12 @@ This API serves as a layer that simplifies communication between Your Applicatio
 * **Must have an account and purchase a subscription at https://stackworkshop.com/packages **
 * **Step 1** : Login to your panel and create your application
 * **Step 2** : Your application secret, AID, and Activate key will be next to your application name
-* **Step 3** : Copy your secret, AID, and ActivateKey and store it somewhere
+* **Step 3** : Copy your secret, AID, ActivateKey, JWT Token and store it somewhere
 
 ### Connecting panel to program
-Now that you have your ``AID`` , ``Secret``, and  ``ActivateKey`` use it to initialize and connect your application to our servers
+Now that you have your ``AID`` , ``Secret``,  ``ActivateKey``, and ``JWTToken`` use it to initialize and connect your application to our servers
 ```
- OnProgramStart.Initialize("APPNAME", "AID", "PROGRAMSECRET", "VERSION", "ActivateKey, false, false);
+ OnProgramStart.Initialize("APPNAME", "AID", "PROGRAMSECRET", "VERSION", "ActivateKey, "JWTToken", false, false);
  
  The two bool parameters at the end of Initialize is AntiDebug and Bad Process Check. These are turned off by default. Just change the false to True to turn them on.
  The Procress Check does add a little delay to the program launch for it to check for programs to crack your application.
