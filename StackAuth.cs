@@ -18,9 +18,160 @@ using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
 using System.IO.Compression;
 using System.Drawing;
+using Newtonsoft.Json;
+
+using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace YourAppName
 {
+
+    #region Private JWT Function
+    public interface IAuthContainerModel
+    {
+        #region Members
+        string SecretKey { get; set; }
+        string SecurityAlgorithm { get; set; }
+        int ExpireMinutes { get; set; }
+
+        Claim[] Claims { get; set; }
+        #endregion
+    }
+    public class JWTContainerModel : IAuthContainerModel
+    {
+        #region Public Methods
+        public int ExpireMinutes { get; set; } = 1440; // 1 days.
+        public string SecretKey { get; set; } = ""; //leave empty
+        public string SecurityAlgorithm { get; set; } = SecurityAlgorithms.HmacSha256Signature;
+
+        public Claim[] Claims { get; set; }
+        #endregion
+    }
+
+    public interface IAuthService
+    {
+        string SecretKey { get; set; }
+        bool IsTokenValid(string token);
+        string GenerateToken(IAuthContainerModel model);
+        IEnumerable<Claim> GetTokenClaims(string token);
+    }
+
+    public class JWTService : IAuthService
+    {
+        #region Members
+        /// <summary>
+        /// The secret key we use to encrypt out token with.
+        /// </summary>
+        public string SecretKey { get; set; }
+        #endregion
+
+        #region Constructor
+        public JWTService(string secretKey)
+        {
+            SecretKey = secretKey;
+        }
+        #endregion
+
+        #region Public Methods
+        /// <summary>
+        /// Validates whether a given token is valid or not, and returns true in case the token is valid otherwise it will return false;
+        /// </summary>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public bool IsTokenValid(string token)
+        {
+            if (string.IsNullOrEmpty(token))
+                throw new ArgumentException("Given token is null or empty.");
+
+            TokenValidationParameters tokenValidationParameters = GetTokenValidationParameters();
+
+            JwtSecurityTokenHandler jwtSecurityTokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                ClaimsPrincipal tokenValid = jwtSecurityTokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken validatedToken);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Generates token by given model.
+        /// Validates whether the given model is valid, then gets the symmetric key.
+        /// Encrypt the token and returns it.
+        /// </summary>
+        /// <param name="model"></param>
+        /// <returns>Generated token.</returns>
+        public string GenerateToken(IAuthContainerModel model)
+        {
+            if (model == null || model.Claims == null || model.Claims.Length == 0)
+                throw new ArgumentException("Arguments to create token are not valid.");
+
+            SecurityTokenDescriptor securityTokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(model.Claims),
+                Expires = DateTime.UtcNow.AddMinutes(Convert.ToInt32(model.ExpireMinutes)),
+                SigningCredentials = new SigningCredentials(GetSymmetricSecurityKey(), model.SecurityAlgorithm)
+            };
+
+            JwtSecurityTokenHandler jwtSecurityTokenHandler = new JwtSecurityTokenHandler();
+            SecurityToken securityToken = jwtSecurityTokenHandler.CreateToken(securityTokenDescriptor);
+            string token = jwtSecurityTokenHandler.WriteToken(securityToken);
+            return token;
+        }
+
+        /// <summary>
+        /// Receives the claims of token by given token as string.
+        /// </summary>
+        /// <remarks>
+        /// Pay attention, one the token is FAKE the method will throw an exception.
+        /// </remarks>
+        /// <param name="token"></param>
+        /// <returns>IEnumerable of claims for the given token.</returns>
+        public IEnumerable<Claim> GetTokenClaims(string token)
+        {
+            if (string.IsNullOrEmpty(token))
+                throw new ArgumentException("Given token is null or empty.");
+
+            TokenValidationParameters tokenValidationParameters = GetTokenValidationParameters();
+
+            JwtSecurityTokenHandler jwtSecurityTokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                ClaimsPrincipal tokenValid = jwtSecurityTokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken validatedToken);
+                return tokenValid.Claims;
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+        }
+        #endregion
+
+        #region Private Methods
+        private SecurityKey GetSymmetricSecurityKey()
+        {
+            byte[] symmetricKey = Convert.FromBase64String(SecretKey);
+            return new SymmetricSecurityKey(symmetricKey);
+        }
+
+        private TokenValidationParameters GetTokenValidationParameters()
+        {
+            return new TokenValidationParameters()
+            {
+                ValidateIssuer = false,
+                ValidateAudience = false,
+                IssuerSigningKey = GetSymmetricSecurityKey()
+            };
+        }
+        #endregion
+    }
+
+    #endregion
+
     internal class App
     {
         public static string GrabVariable(string name)
@@ -71,8 +222,10 @@ namespace YourAppName
 
         public static string Server02 = "https://stackauth.com/auth/";
 
-        public static string[] dllhash = { "Newtonsoft.Json.dll:081d9558bbb7adce142da153b2d5577a", "System.IO.Compression.ZipFile.dll:dcda916372128f13ada8b07026c1b3e7" };
+        public static string[] dllhash = { "Newtonsoft.Json.dll:081d9558bbb7adce142da153b2d5577a", "System.IO.Compression.ZipFile.dll:dcda916372128f13ada8b07026c1b3e7", "System.IdentityModel.Tokens.Jwt.dll:289562fc7249580de4cf313062f4b3dc" };
+        public static string[] StoreHashToIntegrity = { "Newtonsoft.Json.dll", "System.IO.Compression.ZipFile.dll", "System.IdentityModel.Tokens.Jwt.dll" };
 
+        //System.IdentityModel.Tokens.Jwt
         public static bool Initialized = false;
 
         public static Random random = new Random();
@@ -166,10 +319,27 @@ namespace YourAppName
             return request;
         }
     }
+    class SecureFile
+    {
+        public int[] Secure_File { get; set; }
+        public int Key { get; set; }
 
+        public int[] Decrypt()
+        {
+            int[] Decrypted = new int[Secure_File.Length];
+            for (int i = 0; i < Secure_File.Length; i++)
+            {
+                Decrypted[i] = Secure_File[i] ^ Key;
+            }
+            Array.Reverse(Decrypted);
+            return Decrypted;
+        }
+    }
     internal class OnProgramStart
     {
         public static string AID = null;
+
+        public static string JWTKey = null;
 
         public static string Secret = null;
 
@@ -184,19 +354,39 @@ namespace YourAppName
         public static bool ProcessCheck = false;
 
         public static int server = 0;
-        public static void Initialize(string name, string aid, string secret, string version, string ActivateKey, bool debugcheck, bool processcheck)
+
+        #region Private Methods
+        private static JWTContainerModel StartJWT()
+        {    
+            return new JWTContainerModel()
+            {
+                Claims = new Claim[]
+                {
+                new Claim("token", Encryption.EncryptService(Constants.Token)),
+                new Claim("timestamp", Encryption.EncryptService(DateTime.Now.ToString())),
+                new Claim("aid", Encryption.APIService(OnProgramStart.AID)),
+                new Claim("hwid", Encryption.APIService(Constants.HWID())),
+                new Claim("version", Encryption.APIService(Version))
+                }
+            };
+        }
+   
+        #endregion
+
+        public static void Initialize(string name, string aid, string secret, string version, string ActivateKey, string GetJWTKey, bool debugcheck, bool processcheck)
         {
             Constants.ApiUrl = Constants.ApiUrl ?? Constants.Server01;
+            Security.AntiHttpDebugger();
 
             if (debugcheck)
             {
-                if(Security.AntiSandboxie() || Security.AntiDebugger())
+                if (Security.AntiSandboxie() || Security.AntiDebugger())
                 {
                     Process.GetCurrentProcess().Kill();
                 }
             }
 
-            foreach(string dll in Constants.dllhash)
+            foreach (string dll in Constants.dllhash)
             {
                 string dllpath = dll.Split(':')[0];
                 string hash = dll.Split(':')[1];
@@ -210,24 +400,33 @@ namespace YourAppName
                 Process.GetCurrentProcess().Kill();
             }
             AID = aid;
+            JWTKey = GetJWTKey;
             Secret = secret;
             Version = version;
             Name = name;
             DebugCheck = debugcheck;
             ProcessCheck = processcheck;
+            string jwttoken = string.Empty;
+            string response = string.Empty;
 
-            string[] response = new string[] { };
             using (StackWebClient wc = new StackWebClient())
             {
                 try
                 {
                     wc.Proxy = null;
                     Security.Start();
+                    IAuthContainerModel model = StartJWT();
+
+                    model.SecretKey = JWTKey;
+                    IAuthService authService = new JWTService(model.SecretKey);
+                    jwttoken = authService.GenerateToken(model);
+
+                    if (!authService.IsTokenValid(jwttoken))
+                        throw new UnauthorizedAccessException();
+
                     response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
                     {
-                        ["token"] = Encryption.EncryptService(Constants.Token),
-                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
-                        ["aid"] = Encryption.APIService(AID),
+                        ["token"] = Encryption.APIService(jwttoken),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
                         ["api_key"] = Constants.APIENCRYPTKEY,
@@ -235,24 +434,37 @@ namespace YourAppName
                         ["secret"] = Encryption.APIService(Secret),
                         ["type"] = Encryption.APIService("start")
 
-                    }))).Split("|".ToCharArray()));
-                    if (response[14] != ActivateKey)
+                    }))));
+
+                    IAuthService authService1 = new JWTService(model.SecretKey);
+
+                    if (!authService1.IsTokenValid(response))
+                       throw new UnauthorizedAccessException();
+
+                    List<Claim> claims = authService1.GetTokenClaims(response).ToList();
+
+                    if (claims.FirstOrDefault(e => e.Type.Equals("key")).Value != ActivateKey)
                     {
-                        StackAPI.Log("01");
+                        StackAPI.Ban("Activation Key Incorrect");
                         Process.GetCurrentProcess().Kill();
                     }
+             
                     if (wc.ResponseUri.ToString() != Constants.ApiUrl)
                     {
                         MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
+
                     if (wc.GetHost.ToString() != "stackworkshop.com")
                     {
+                        StackAPI.Ban(response[14] + " Domain hijack detected");
                         MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
-                    if (Security.MaliciousCheck(response[1]))
+
+                    if (Security.MaliciousCheck(claims.FirstOrDefault(e => e.Type.Equals("timestamp")).Value))
                     {
+                        StackAPI.Ban(response[14] + " Domain hijack detected");
                         MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
@@ -261,43 +473,49 @@ namespace YourAppName
                         MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
-                    if (response[0] != Constants.Token)
+                    if (claims.FirstOrDefault(e => e.Type.Equals("token")).Value != Constants.Token)
                     {
-                        MessageBox.Show(response[0]);
                         MessageBox.Show("Security error has been triggered!", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                         Process.GetCurrentProcess().Kill();
                     }
-                    switch (response[2])
+                    switch (claims.FirstOrDefault(e => e.Type.Equals("verify")).Value)
                     {
                         case "success":
                             Constants.Initialized = true;
-                            if (response[3] == "Enabled")
+                            if (claims.FirstOrDefault(e => e.Type.Equals("status")).Value == "Enabled") 
                                 ApplicationSettings.Status = true;
-                            if (response[4] == "Enabled")
+                            if (claims.FirstOrDefault(e => e.Type.Equals("dev")).Value == "Enabled")
                                 ApplicationSettings.DeveloperMode = true;
-                            ApplicationSettings.Hash = response[5];
-                            ApplicationSettings.Version = response[6];
-                            ApplicationSettings.Update_Link = response[7];
-                            if (response[8] == "Enabled")
+                            ApplicationSettings.Hash = claims.FirstOrDefault(e => e.Type.Equals("hash")).Value;
+                            ApplicationSettings.Version = claims.FirstOrDefault(e => e.Type.Equals("version")).Value;
+                            ApplicationSettings.Update_Link = claims.FirstOrDefault(e => e.Type.Equals("updateurl")).Value;
+                            if (claims.FirstOrDefault(e => e.Type.Equals("freemode")).Value == "Enabled")
                                 ApplicationSettings.Freemode = true;
-                            if (response[9] == "Enabled")
+                            if (claims.FirstOrDefault(e => e.Type.Equals("Login")).Value == "Enabled")
                                 ApplicationSettings.Login = true;
-                            ApplicationSettings.Name = response[10];
-                            if (response[11] == "Enabled")
+                            ApplicationSettings.Name = claims.FirstOrDefault(e => e.Type.Equals("App")).Value;
+                            if (claims.FirstOrDefault(e => e.Type.Equals("Register")).Value == "Enabled")
                                 ApplicationSettings.Register = true;
-                            ApplicationSettings.TotalUsers = response[13];
-                            ApplicationSettings.Updater_Check = response[15];
+                            ApplicationSettings.TotalUsers = claims.FirstOrDefault(e => e.Type.Equals("Total Users")).Value;
+                            ApplicationSettings.Updater_Check = claims.FirstOrDefault(e => e.Type.Equals("CustomUpdater")).Value;
                             if (ApplicationSettings.DeveloperMode)
                             {
                                 MessageBox.Show("Application is in Developer Mode, bypassing integrity and update check!", Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                                 File.Create(Environment.CurrentDirectory + "/integrity.log").Close();
                                 string hash = Security.Integrity(Process.GetCurrentProcess().MainModule.FileName);
-                                File.WriteAllText(Environment.CurrentDirectory + "/integrity.log", hash);
+                                File.WriteAllText(Environment.CurrentDirectory + "/integrity.log", OnProgramStart.Name + ": " + hash);
+                                foreach (string dll in Constants.StoreHashToIntegrity)
+                                {
+                                    string dllpath = dll.Split(':')[0];
+                                    string dllhash = Security.Integrity(dllpath);
+                                    File.AppendAllText(Environment.CurrentDirectory + "/integrity.log", Environment.NewLine + dllpath + ": " + dllhash);
+
+                                }
                                 MessageBox.Show("Your applications hash has been saved to integrity.txt, please refer to this when your application is ready for release!", Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
                             }
                             else
                             {
-                                if (response[12] == "Enabled")
+                                if (claims.FirstOrDefault(e => e.Type.Equals("Integrity")).Value == "Enabled")
                                 {
                                     if (ApplicationSettings.Hash != Security.Integrity(Process.GetCurrentProcess().MainModule.FileName))
                                     {
@@ -364,7 +582,8 @@ namespace YourAppName
                 }
                 catch (Exception ex)
                 {
-                    switch(Constants.ApiUrl)
+                    MessageBox.Show(ex.Message);
+                    switch (Constants.ApiUrl)
                     {
                         case "https://stackworkshop.com/auth/Auth/":
                             Constants.ApiUrl = Constants.Server02;
@@ -374,13 +593,13 @@ namespace YourAppName
                             break;
                     }
                     server++;
-                    if(server == 2)
+                    if (server == 2)
                     {
                         MessageBox.Show("Server 1 and Server 2 are down! :(", Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                         MessageBox.Show(ex.Message, Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                         Process.GetCurrentProcess().Kill();
                     }
-                    Initialize(name, aid, secret, version, ActivateKey, debugcheck, processcheck);
+                    Initialize(name, aid, secret, version, ActivateKey,JWTKey, debugcheck, processcheck);
                 }
             }
         }
@@ -388,9 +607,10 @@ namespace YourAppName
 
     internal class StackAPI
     {
+
         public static void ForgotPassword(string username, string newpassword)
         {
-            if(newpassword== null || string.IsNullOrWhiteSpace(newpassword))
+            if (newpassword == null || string.IsNullOrWhiteSpace(newpassword))
             {
                 MessageBox.Show("Please put desire password in the password field!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
@@ -464,12 +684,12 @@ namespace YourAppName
         }
         public static void UpdateInformation(string email, string password)
         {
-            if(email == null)
+            if (email == null)
             {
                 email = User.Email;
             }
 
-            if(password == null)
+            if (password == null)
             {
                 password = User.Password;
             }
@@ -480,7 +700,7 @@ namespace YourAppName
                 Process.GetCurrentProcess().Kill();
             }
 
-      
+
             string[] response = new string[] { };
             using (StackWebClient wc = new StackWebClient())
             {
@@ -545,6 +765,26 @@ namespace YourAppName
             }
 
         }
+        private static JWTContainerModel JWTLog(string reason)
+        {
+            return new JWTContainerModel()
+            {
+                Claims = new Claim[]
+                {
+                new Claim("token", Encryption.EncryptService(Constants.Token)),
+                new Claim("timestamp", Encryption.EncryptService(DateTime.Now.ToString())),
+                new Claim("aid", Encryption.APIService(OnProgramStart.AID)),
+                new Claim("hwid", Encryption.APIService(Constants.HWID())),
+                new Claim("version", Encryption.EncryptService(OnProgramStart.Version)),
+                new Claim("username", Encryption.APIService(User.Username)),
+                new Claim("data", Encryption.APIService(reason)),
+                new Claim("pcuser", Encryption.APIService(Environment.UserName)),
+                new Claim("session_id", Encryption.APIService(Constants.IV)),
+                new Claim("session_key", Encryption.APIService(Constants.Key))
+                }
+            };
+        }
+
         public static void Log(string reason)
         {
             if (!Constants.Initialized)
@@ -557,29 +797,42 @@ namespace YourAppName
                 MessageBox.Show("Missing log information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
             }
-            string[] response = new string[] { };
+            string response = String.Empty;
+            string jwttoken = String.Empty;
             using (StackWebClient wc = new StackWebClient())
             {
                 try
                 {
                     Security.Start();
                     wc.Proxy = null;
+                    IAuthContainerModel model = JWTLog(reason);
+                    model.SecretKey = OnProgramStart.JWTKey;
+
+                    IAuthService authService = new JWTService(model.SecretKey);
+                    jwttoken = authService.GenerateToken(model);
+
+                    if (!authService.IsTokenValid(jwttoken))
+                        throw new UnauthorizedAccessException();
+
                     response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
                     {
-                        ["token"] = Encryption.EncryptService(Constants.Token),
-                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["username"] = Encryption.APIService(User.Username),
-                        ["pcuser"] = Encryption.APIService(Environment.UserName),
-                        ["session_id"] = Constants.IV,
+                        ["token"] = Encryption.APIService(jwttoken),
                         ["api_id"] = Constants.APIENCRYPTSALT,
                         ["api_key"] = Constants.APIENCRYPTKEY,
-                        ["data"] = Encryption.APIService(reason),
-                        ["session_key"] = Constants.Key,
                         ["secret"] = Encryption.APIService(OnProgramStart.Secret),
                         ["type"] = Encryption.APIService("log")
-                    }))).Split("|".ToCharArray()));
 
-                    if (response[3] == "empty_webhook")
+                    }))));
+
+                    model.SecretKey = OnProgramStart.JWTKey;
+                    IAuthService authService1 = new JWTService(model.SecretKey);
+
+                    if (!authService1.IsTokenValid(response))
+                        throw new UnauthorizedAccessException();
+
+                    List<Claim> claims = authService1.GetTokenClaims(response).ToList();
+
+                    if (claims.FirstOrDefault(e => e.Type.Equals("status")).Value == "empty_webhook")
                         MessageBox.Show("No webhook set, Please login to the panel and add a discord webhook", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
 
                     Security.End();
@@ -593,7 +846,6 @@ namespace YourAppName
         }
         public static void Ban(string action)
         {
-            Security.Abandon();
             if (!Constants.Initialized)
             {
                 MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -635,6 +887,9 @@ namespace YourAppName
                     Process.GetCurrentProcess().Kill();
                 }
             }
+            Security.Abandon();
+            Process.GetCurrentProcess().Kill();
+
         }
 
         public static void ChangeProfilePic(string path)
@@ -710,225 +965,25 @@ namespace YourAppName
                 }
             }
         }
-        public static bool AIO(string AIO)
+  
+        private static JWTContainerModel JWTLogin(string username, string password)
         {
-            if (AIOLogin(AIO))
+            return new JWTContainerModel()
             {
-                return true;
-            }
-            else
-            {
-                if (AIORegister(AIO))
+                Claims = new Claim[]
                 {
-                    return true;
+                new Claim("token", Encryption.EncryptService(Constants.Token)),
+                new Claim("timestamp", Encryption.EncryptService(DateTime.Now.ToString())),
+                new Claim("aid", Encryption.APIService(OnProgramStart.AID)),
+                new Claim("hwid", Encryption.APIService(Constants.HWID())),
+                new Claim("version", Encryption.EncryptService(OnProgramStart.Version)),
+                new Claim("username", Encryption.APIService(username)),
+                new Claim("password", Encryption.APIService(password)),
+                new Claim("session_key", Encryption.APIService(Constants.Key))
                 }
-                else
-                {
-                    return false;
-                }
-            }
+            };
         }
-        public static bool AIOLogin(string AIO)
-        {
-            if (!Constants.Initialized)
-            {
-                MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Process.GetCurrentProcess().Kill();
-            }
-            if (string.IsNullOrWhiteSpace(AIO))
-            {
-                MessageBox.Show("Missing user login information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Process.GetCurrentProcess().Kill();
-            }
-            string[] response = new string[] { };
-            using (StackWebClient wc = new StackWebClient())
-            {
-                try
-                {
-                    Security.Start();
-                    wc.Proxy = null;
-                    response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
-                    {
-                        ["token"] = Encryption.EncryptService(Constants.Token),
-                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
-                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["session_id"] = Constants.IV,
-                        ["api_id"] = Constants.APIENCRYPTSALT,
-                        ["api_key"] = Constants.APIENCRYPTKEY,
-                        ["username"] = Encryption.APIService(AIO),
-                        ["password"] = Encryption.APIService(AIO),
-                        ["hwid"] = Encryption.APIService(Constants.HWID()),
-                        ["session_key"] = Constants.Key,
-                        ["secret"] = Encryption.APIService(OnProgramStart.Secret),
-                        ["type"] = Encryption.APIService("login")
 
-                    }))).Split("|".ToCharArray()));
-
-                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
-                    {
-                        MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    if (response[0] != Constants.Token)
-                    {
-                        MessageBox.Show("Security error has been triggered!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    if (Security.MaliciousCheck(response[1]))
-                    {
-                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    if (Constants.Breached)
-                    {
-                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-
-                    switch (response[2])
-                    {
-                        case "success":
-                            Security.End();
-                            User.ID = response[3];
-                            User.Username = response[4];
-                            User.Password = response[5];
-                            User.Email = response[6];
-                            User.HWID = response[7];
-                            User.UserVariable = response[8];
-                            User.Rank = response[9];
-                            User.IP = response[10];
-                            User.Expiry = response[11];
-                            User.LastLogin = response[12];
-                            User.RegisterDate = response[13];
-                            string Variables = response[14];
-                            User.ProfilePicture = response[15];
-                            ApplicationSettings.Updater_Check = response[16];
-                            User.Ban_Reason = response[17];
-                            foreach (string var in Variables.Split('~'))
-                            {
-                                string[] items = var.Split('^');
-                                try
-                                {
-                                    App.Variables.Add(items[0], items[1]);
-                                }
-                                catch
-                                {
-                                    //If some are null or not loaded, just ignore.
-                                    //Error will be shown when loading the variable anyways
-                                }
-                            }
-                            return true;
-                        case "invalid_details":
-                            Security.End();
-                            return false;
-                        case "time_expired":
-                            MessageBox.Show("Your subscription has expired!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            Security.End();
-                            return false;
-                        case "hwid_updated":
-                            MessageBox.Show("New machine has been binded, re-open the application!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            Security.End();
-                            return false;
-                        case "invalid_hwid":
-                            MessageBox.Show("This user is binded to another computer, please contact support!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            Security.End();
-                            return false;
-                        case "banned":
-                            User.Ban_Reason = response[16];
-                            MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!" + Environment.NewLine + "Reason: " + User.Ban_Reason, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            Security.End();
-                            return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    Security.End();
-                    Process.GetCurrentProcess().Kill();
-                }
-                return false;
-
-            }
-        }
-        public static bool AIORegister(string AIO)
-        {
-            if (!Constants.Initialized)
-            {
-                MessageBox.Show("Please initialize your application first!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Security.End();
-                Process.GetCurrentProcess().Kill();
-            }
-            if (string.IsNullOrWhiteSpace(AIO))
-            {
-                MessageBox.Show("Invalid registrar information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Process.GetCurrentProcess().Kill();
-            }
-            string[] response = new string[] { };
-            using (StackWebClient wc = new StackWebClient())
-            {
-                try
-                {
-                    Security.Start();
-                    wc.Proxy = null;
-
-                    response = Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
-                    {
-                        ["token"] = Encryption.EncryptService(Constants.Token),
-                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
-                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
-                        ["session_id"] = Constants.IV,
-                        ["api_id"] = Constants.APIENCRYPTSALT,
-                        ["api_key"] = Constants.APIENCRYPTKEY,
-                        ["session_key"] = Constants.Key,
-                        ["secret"] = Encryption.APIService(OnProgramStart.Secret),
-                        ["type"] = Encryption.APIService("register"),
-                        ["username"] = Encryption.APIService(AIO),
-                        ["password"] = Encryption.APIService(AIO),
-                        ["email"] = Encryption.APIService(AIO),
-                        ["license"] = Encryption.APIService(AIO),
-                        ["hwid"] = Encryption.APIService(Constants.HWID()),
-
-                    }))).Split("|".ToCharArray());
-
-                    if (wc.ResponseUri.ToString() != Constants.ApiUrl)
-                    {
-                        MessageBox.Show("Possible Domain hijack detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-
-                    if (response[0] != Constants.Token)
-                    {
-                        MessageBox.Show("Security error has been triggered!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        Security.End();
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    if (Security.MaliciousCheck(response[1]))
-                    {
-                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    if (Constants.Breached)
-                    {
-                        MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                        Process.GetCurrentProcess().Kill();
-                    }
-                    Security.End();
-                    switch (response[2])
-                    {
-                        case "success":
-                            return true;
-                        case "error":
-                            return false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(ex.Message, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    Process.GetCurrentProcess().Kill();
-                }
-                return false;
-            }
-        }
         public static bool Login(string username, string password)
         {
             if (!Constants.Initialized)
@@ -941,29 +996,44 @@ namespace YourAppName
                 MessageBox.Show("Missing user login information!", ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Process.GetCurrentProcess().Kill();
             }
-            string[] response = new string[] { };
+            string response = string.Empty;
+            string jwttoken = string.Empty;
+
             using (StackWebClient wc = new StackWebClient())
             {
                 try
                 {
                     Security.Start();
                     wc.Proxy = null;
+
+                    IAuthContainerModel model = JWTLogin(username, password);
+                    model.SecretKey = OnProgramStart.JWTKey;
+
+                    IAuthService authService = new JWTService(model.SecretKey);
+                    jwttoken = authService.GenerateToken(model);
+
+                    if (!authService.IsTokenValid(jwttoken))
+                        throw new UnauthorizedAccessException();
+
                     response = (Encryption.DecryptService(Encoding.Default.GetString(wc.UploadValues(Constants.ApiUrl, new NameValueCollection
                     {
-                        ["token"] = Encryption.EncryptService(Constants.Token),
-                        ["timestamp"] = Encryption.EncryptService(DateTime.Now.ToString()),
-                        ["aid"] = Encryption.APIService(OnProgramStart.AID),
+                        ["token"] = Encryption.APIService(jwttoken),
                         ["session_id"] = Constants.IV,
                         ["api_id"] = Constants.APIENCRYPTSALT,
                         ["api_key"] = Constants.APIENCRYPTKEY,
-                        ["username"] = Encryption.APIService(username),
-                        ["password"] = Encryption.APIService(password),
-                        ["hwid"] = Encryption.APIService(Constants.HWID()),
-                        ["session_key"] = Constants.Key,
                         ["secret"] = Encryption.APIService(OnProgramStart.Secret),
                         ["type"] = Encryption.APIService("login")
 
-                    }))).Split("|".ToCharArray()));
+                    }))));
+
+                    model.SecretKey = OnProgramStart.JWTKey;
+                    IAuthService authService1 = new JWTService(model.SecretKey);
+
+                    Clipboard.SetText(response);
+                    if (!authService1.IsTokenValid(response))
+                        throw new UnauthorizedAccessException();
+
+                    List<Claim> claims = authService1.GetTokenClaims(response).ToList();
 
                     if (wc.ResponseUri.ToString() != Constants.ApiUrl)
                     {
@@ -971,13 +1041,12 @@ namespace YourAppName
                         Process.GetCurrentProcess().Kill();
                     }
 
-                    if (response[0] != Constants.Token)
+                    if (claims.FirstOrDefault(e => e.Type.Equals("token")).Value != Constants.Token)
                     {
-                        MessageBox.Show(response[0]);
                         MessageBox.Show("Security error has been triggered!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                         Process.GetCurrentProcess().Kill();
                     }
-                    if (Security.MaliciousCheck(response[1]))
+                    if (Security.MaliciousCheck(claims.FirstOrDefault(e => e.Type.Equals("timestamp")).Value))
                     {
                         MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
@@ -987,22 +1056,23 @@ namespace YourAppName
                         MessageBox.Show("Possible malicious activity detected!", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         Process.GetCurrentProcess().Kill();
                     }
-                    switch (response[2])
+                    switch (claims.FirstOrDefault(e => e.Type.Equals("status")).Value)
                     {
                         case "success":
-                            User.ID = response[3];
-                            User.Username = response[4];
-                            User.Password = response[5];
-                            User.Email = response[6];
-                            User.HWID = response[7];
-                            User.UserVariable = response[8];
-                            User.Rank = response[9];
-                            User.IP = response[10];
-                            User.Expiry = response[11];
-                            User.LastLogin = response[12];
-                            User.RegisterDate = response[13];
-                            string Variables = response[14];
-                            User.ProfilePicture = response[15];
+                            User.ID = claims.FirstOrDefault(e => e.Type.Equals("id")).Value;
+                            User.Username = claims.FirstOrDefault(e => e.Type.Equals("username")).Value;
+                            User.Password = claims.FirstOrDefault(e => e.Type.Equals("password")).Value;
+                            User.Email = claims.FirstOrDefault(e => e.Type.Equals("mail")).Value;
+                            User.HWID = claims.FirstOrDefault(e => e.Type.Equals("hwid")).Value;
+                            User.UserVariable = claims.FirstOrDefault(e => e.Type.Equals("user_var")).Value;
+                            User.Rank = claims.FirstOrDefault(e => e.Type.Equals("rank")).Value;
+                            User.IP = claims.FirstOrDefault(e => e.Type.Equals("ip")).Value;
+                            User.Expiry = claims.FirstOrDefault(e => e.Type.Equals("expire")).Value;
+                            User.LastLogin = claims.FirstOrDefault(e => e.Type.Equals("LastLogin")).Value;
+                            User.RegisterDate = claims.FirstOrDefault(e => e.Type.Equals("RegDate")).Value;
+                            string Variables = claims.FirstOrDefault(e => e.Type.Equals("server_var")).Value;
+                            User.ProfilePicture = claims.FirstOrDefault(e => e.Type.Equals("picture")).Value;
+                            
                             foreach (string var in Variables.Split('~'))
                             {
                                 string[] items = var.Split('^');
@@ -1012,14 +1082,14 @@ namespace YourAppName
                                 }
                                 catch
                                 {
-                                    //If some are null or not loaded, just ignore.
-                                    //Error will be shown when loading the variable anyways
+                                   // If some are null or not loaded, just ignore.
+                                 //   Error will be shown when loading the variable anyways
                                 }
                             }
                             Security.End();
                             return true;
                         case "invalid_details":
-                             MessageBox.Show("Incorrect Details, Please Check you're username and password", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            MessageBox.Show("Incorrect Details, Please Check you're username and password", OnProgramStart.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             Security.End();
                             return false;
                         case "time_expired":
@@ -1036,7 +1106,7 @@ namespace YourAppName
                             Security.End();
                             return false;
                         case "banned":
-                            User.Ban_Reason = response[16];
+                            User.Ban_Reason = claims.FirstOrDefault(e => e.Type.Equals("banreason")).Value;
                             MessageBox.Show("This user is banned, please contact support on discord if you believe this is a mistake!" + Environment.NewLine + "Reason: " + User.Ban_Reason, ApplicationSettings.Name, MessageBoxButtons.OK, MessageBoxIcon.Error);
                             Security.End();
                             Application.Exit();
@@ -1309,13 +1379,7 @@ namespace YourAppName
                 return false;
             }
         }
-        public static string LoadStringFromURL(string url)
-        {
-            string DResponse;
-            using (WebClient GData = new WebClient())
-                DResponse = GData.DownloadString(url).ToString();
-            return DResponse;
-        }
+
     }
     public static class ProcessExtensions
     {
@@ -1354,7 +1418,6 @@ namespace YourAppName
         [DllImport("Kernel32.dll", SetLastError = true, ExactSpelling = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool CheckRemoteDebuggerPresent(IntPtr hProcess, [MarshalAs(UnmanagedType.Bool)] ref bool isDebuggerPresent);
-        //static extern bool CheckRemoteDebuggerPresent(IntPtr hProcess, ref bool isDebuggerPresent);
         [DllImport("kernel32.dll")]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
         [DllImport("ntdll.dll", SetLastError = true)]
@@ -1370,12 +1433,7 @@ namespace YourAppName
         static extern int memcmp(byte[] b1, byte[] b2, long count);
         [DllImport("User32.dll", CharSet = CharSet.Unicode)]
         public static extern int MessageBoxDisplay(IntPtr h, string m, string c, int type);
-        static bool ByteArrayCompare(byte[] b1, byte[] b2)
-        {
-            // Validate buffers are the same length.
-            // This also ensures that the count does not exceed the length of either buffer.  
-            return b1.Length == b2.Length && memcmp(b1, b2, b1.Length) == 0;
-        }
+ 
         [Flags]
         public enum ProcessAccessFlags : uint
         {
@@ -1475,7 +1533,7 @@ namespace YourAppName
             catch { }
 
         }
-        public static bool AntiDebugger() 
+        public static bool AntiDebugger()
         {
             bool DebuggerPresent = false;
             CheckRemoteDebuggerPresent(OpenProcess(ProcessAccessFlags.All, false, Process.GetCurrentProcess().Id), ref DebuggerPresent);
@@ -1508,14 +1566,29 @@ namespace YourAppName
             if (GetModuleHandle("SbieDll.dll").ToInt32() != 0)
                 return true;
 
-            if (GetModuleHandle("pssdk.dll").ToInt32() != 0)
+
+            return false;
+        }
+
+        public static bool AntiHttpDebugger()
+        {
+            if (CheckLibrary("pssdk.dll"))
                 return true;
 
-            if (GetModuleHandle("ws2_32.dll").ToInt32() != 0)
+            if (CheckLibrary("ws2_32.dll"))
                 return true;
 
             return false;
         }
+
+        [DllImport("kernel32", SetLastError = true)]
+        static extern IntPtr LoadLibrary(string lpFileName);
+
+        static bool CheckLibrary(string fileName)
+        {
+            return LoadLibrary(fileName) == IntPtr.Zero;
+        }
+
         public static IntPtr OpenProcess(ProcessAccessFlags flags1, Process proc, ProcessAccessFlags flags)
         {
             return OpenProcess(flags, false, proc.Id);
@@ -1536,7 +1609,7 @@ namespace YourAppName
             return new string(Enumerable.Repeat(chars, length)
              .Select(s => s[random.Next(s.Length)]).ToArray());
         }
-  
+
         public static string Obfuscate(int length)
         {
             Random random = new Random();
@@ -1614,7 +1687,6 @@ namespace YourAppName
             OnProgramStart.Version = "8.1.9.2";
             OnProgramStart.Salt = null;
         }
-
         private static bool PinPublicKey(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
         {
             if ((!certificate.Issuer.Contains("Cloudflare Inc") && !certificate.Issuer.Contains("Google Trust Services") && !certificate.Issuer.Contains("Let's Encrypt")) || sslPolicyErrors != SslPolicyErrors.None)
@@ -1624,7 +1696,6 @@ namespace YourAppName
 
             return certificate != null;
         }
-
         public static string Integrity(string filename)
         {
             string result;
@@ -1653,7 +1724,6 @@ namespace YourAppName
                 return false;
             }
         }
-
         public static void HashCheck(string dllpath, string dllstoredhash)
         {
             if (File.Exists(dllpath))
@@ -1666,12 +1736,10 @@ namespace YourAppName
                 }
             }
         }
-
         public static string GetHash(string dllpath)
         {
             return CalculateMD5(dllpath);
         }
-
         private static string CalculateMD5(string filename)
         {
             using (var md5 = MD5.Create())
@@ -1850,9 +1918,21 @@ namespace YourAppName
             return matches.Groups[2].ToString();
         }
     }
-
     class StackUtities
     {
+        public static string Base64Encode(string plainText)
+        {
+            var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
+            return System.Convert.ToBase64String(plainTextBytes);
+        }
+
+        public static string LoadStringFromURL(string url)
+        {
+            string DResponse;
+            using (WebClient GData = new WebClient())
+                DResponse = GData.DownloadString(url).ToString();
+            return DResponse;
+        }
         public string[] CreateArrayFromTxtFile(string txtfile)
         {
             if (File.Exists(txtfile))
